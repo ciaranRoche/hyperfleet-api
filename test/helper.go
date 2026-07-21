@@ -32,6 +32,7 @@ import (
 	"github.com/openshift-hyperfleet/hyperfleet-api/test/mocks"
 
 	_ "github.com/openshift-hyperfleet/hyperfleet-api/plugins/entities"
+	_ "github.com/openshift-hyperfleet/hyperfleet-api/plugins/k8sfacade"
 )
 
 const (
@@ -302,6 +303,16 @@ func (helper *Helper) RestURL(path string) string {
 		protocol = "https" //nolint:goconst // Protocol strings used across URL builders
 	}
 	return fmt.Sprintf("%s://%s/api/hyperfleet/v1%s", protocol, helper.AppConfig.Server.BindAddress(), path)
+}
+
+// RootURL returns a server URL outside the /api/hyperfleet/v1 prefix
+// (e.g. the Kubernetes-compatible facade at /apis).
+func (helper *Helper) RootURL(path string) string {
+	protocol := "http" //nolint:goconst // Protocol strings used across URL builders
+	if helper.AppConfig.Server.TLS.Enabled {
+		protocol = "https" //nolint:goconst // Protocol strings used across URL builders
+	}
+	return fmt.Sprintf("%s://%s%s", protocol, helper.AppConfig.Server.BindAddress(), path)
 }
 
 func (helper *Helper) MetricsURL(path string) string {

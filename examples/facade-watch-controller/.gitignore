@@ -1,0 +1,3 @@
+controller
+scripts/facade-kubeconfig
+scripts/.port-forward.pid

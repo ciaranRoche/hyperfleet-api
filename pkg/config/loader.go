@@ -182,6 +182,11 @@ func (l *ConfigLoader) validateConfig(config *ApplicationConfig) error {
 		if valErr := config.Metrics.Validate(); valErr != nil {
 			return fmt.Errorf("metrics config validation failed: %w", valErr)
 		}
+		if config.K8sFacade != nil {
+			if valErr := config.K8sFacade.Validate(); valErr != nil {
+				return fmt.Errorf("k8s_facade config validation failed: %w", valErr)
+			}
+		}
 		return nil
 	}
 

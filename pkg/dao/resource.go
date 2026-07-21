@@ -21,6 +21,8 @@ type ResourceDao interface {
 	ExistsSoftDeletedByOwner(ctx context.Context, kinds []string, ownerID string) (bool, error)
 	FindByKind(ctx context.Context, kind string) (api.ResourceList, error)
 	FindByKindAndOwner(ctx context.Context, kind, ownerID string) (api.ResourceList, error)
+	GetByName(ctx context.Context, kind, name string) (*api.Resource, error)
+	GetByOwnerAndName(ctx context.Context, kind, ownerID, name string) (*api.Resource, error)
 	FindByKindAndOwnerForUpdate(ctx context.Context, kind, ownerID string) (api.ResourceList, error)
 	GetByID(ctx context.Context, id string) (*api.Resource, error)
 	ReplaceReferences(ctx context.Context, sourceID string, refs []api.ResourceReference) error
@@ -151,6 +153,36 @@ func (d *sqlResourceDao) FindByKindAndOwner(ctx context.Context, kind, ownerID s
 		return nil, err
 	}
 	return resources, nil
+}
+
+// GetByName returns the top-level resource with the given kind and name.
+// A live row wins over soft-deleted rows carrying a reclaimed name; among
+// soft-deleted ghosts the newest is returned.
+func (d *sqlResourceDao) GetByName(ctx context.Context, kind, name string) (*api.Resource, error) {
+	g2 := d.sessionFactory.New(ctx)
+	var resource api.Resource
+	if err := g2.Preload("Conditions").Preload("Labels").Preload("References").
+		Where("kind = ? AND name = ? AND owner_id IS NULL", kind, name).
+		Order("(deleted_time IS NULL) DESC, created_time DESC").
+		Take(&resource).Error; err != nil {
+		return nil, err
+	}
+	return &resource, nil
+}
+
+// GetByOwnerAndName is GetByName scoped to child resources of one owner.
+func (d *sqlResourceDao) GetByOwnerAndName(
+	ctx context.Context, kind, ownerID, name string,
+) (*api.Resource, error) {
+	g2 := d.sessionFactory.New(ctx)
+	var resource api.Resource
+	if err := g2.Preload("Conditions").Preload("Labels").Preload("References").
+		Where("kind = ? AND name = ? AND owner_id = ?", kind, name, ownerID).
+		Order("(deleted_time IS NULL) DESC, created_time DESC").
+		Take(&resource).Error; err != nil {
+		return nil, err
+	}
+	return &resource, nil
 }
 
 func (d *sqlResourceDao) GetByID(ctx context.Context, id string) (*api.Resource, error) {

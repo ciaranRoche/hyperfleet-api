@@ -162,6 +162,24 @@ func (d *mockResourceDao) FindByKindAndOwnerForUpdate(
 	return d.FindByKindAndOwner(ctx, kind, ownerID)
 }
 
+func (d *mockResourceDao) GetByName(_ context.Context, kind, name string) (*api.Resource, error) {
+	for _, r := range d.resources {
+		if r.Kind == kind && r.Name == name && r.OwnerID == nil {
+			return r, nil
+		}
+	}
+	return nil, gorm.ErrRecordNotFound
+}
+
+func (d *mockResourceDao) GetByOwnerAndName(_ context.Context, kind, ownerID, name string) (*api.Resource, error) {
+	for _, r := range d.resources {
+		if r.Kind == kind && r.Name == name && r.OwnerID != nil && *r.OwnerID == ownerID {
+			return r, nil
+		}
+	}
+	return nil, gorm.ErrRecordNotFound
+}
+
 func (d *mockResourceDao) GetByID(_ context.Context, id string) (*api.Resource, error) {
 	for _, r := range d.resources {
 		if r.ID == id {
@@ -277,10 +295,66 @@ func (d *resourceConditionMock) DeleteByResource(_ context.Context, resourceID s
 
 var _ dao.ResourceConditionDao = &resourceConditionMock{}
 
+// resourceEventMock implements dao.ResourceEventDao, recording emitted events
+// and assigning sequential seqs.
+type resourceEventMock struct {
+	events  []*api.ResourceEvent
+	nextSeq int64
+}
+
+func newResourceEventMock() *resourceEventMock {
+	return &resourceEventMock{}
+}
+
+func (d *resourceEventMock) Create(_ context.Context, event *api.ResourceEvent) (int64, error) {
+	d.nextSeq++
+	event.Seq = d.nextSeq
+	d.events = append(d.events, event)
+	return d.nextSeq, nil
+}
+
+func (d *resourceEventMock) ListSince(_ context.Context, afterSeq int64, limit int) ([]api.ResourceEvent, error) {
+	var result []api.ResourceEvent
+	for _, e := range d.events {
+		if e.Seq > afterSeq && len(result) < limit {
+			result = append(result, *e)
+		}
+	}
+	return result, nil
+}
+
+func (d *resourceEventMock) SafeHead(_ context.Context) (int64, error) {
+	return d.nextSeq, nil
+}
+
+func (d *resourceEventMock) MinRetainedSeq(_ context.Context) (int64, error) {
+	if len(d.events) == 0 {
+		return 0, nil
+	}
+	return d.events[0].Seq, nil
+}
+
+func (d *resourceEventMock) CompactBelow(_ context.Context, seq int64) (int64, error) {
+	var kept []*api.ResourceEvent
+	var removed int64
+	for _, e := range d.events {
+		if e.Seq < seq {
+			removed++
+			continue
+		}
+		kept = append(kept, e)
+	}
+	d.events = kept
+	return removed, nil
+}
+
+var _ dao.ResourceEventDao = &resourceEventMock{}
+
 func newTestResourceService(mockDao *mockResourceDao) (ResourceService, *mockResourceDao, *resourceGenericMock) {
 	generic := &resourceGenericMock{}
 	svc := NewResourceService(
-		mockDao, newMockResourceLabelDao(), newMockAdapterStatusDao(), newResourceConditionMock(), generic,
+		mockDao, newMockResourceLabelDao(), newMockAdapterStatusDao(), newResourceConditionMock(),
+		newResourceEventMock(), generic,
 	)
 	return svc, mockDao, generic
 }
@@ -291,7 +365,8 @@ func newTestResourceServiceWithLabelDao(
 	generic := &resourceGenericMock{}
 	labelDao := newMockResourceLabelDao()
 	svc := NewResourceService(
-		mockDao, labelDao, newMockAdapterStatusDao(), newResourceConditionMock(), generic,
+		mockDao, labelDao, newMockAdapterStatusDao(), newResourceConditionMock(),
+		newResourceEventMock(), generic,
 	)
 	return svc, mockDao, generic, labelDao
 }
@@ -302,7 +377,9 @@ func newTestResourceServiceWithAdapterStatus(
 	asDao := newMockAdapterStatusDao()
 	rcDao := newResourceConditionMock()
 	generic := &resourceGenericMock{}
-	svc := NewResourceService(mockDao, newMockResourceLabelDao(), asDao, rcDao, generic)
+	svc := NewResourceService(
+		mockDao, newMockResourceLabelDao(), asDao, rcDao, newResourceEventMock(), generic,
+	)
 	return svc, mockDao, asDao, rcDao
 }
 

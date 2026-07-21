@@ -188,12 +188,18 @@
                         "description": "HTTP header carrying a pre-authenticated identity (bypasses JWT claim when set)"
                       }
                     },
-                    "required": ["issuer_url"],
+                    "required": [
+                      "issuer_url"
+                    ],
                     "if": {
-                      "required": ["jwk_cert_ca_file"]
+                      "required": [
+                        "jwk_cert_ca_file"
+                      ]
                     },
                     "then": {
-                      "required": ["jwk_cert_url"]
+                      "required": [
+                        "jwk_cert_url"
+                      ]
                     }
                   }
                 }
@@ -411,12 +417,41 @@
             }
           }
         },
+        "k8s_facade": {
+          "type": "object",
+          "description": "Kubernetes-compatible read facade (discovery + list + watch) at /apis/hyperfleet.openshift.io/v1alpha1",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Enable the facade routes and watch cache"
+            },
+            "poll_interval": {
+              "type": "string",
+              "description": "Watch-cache poll cadence (Go duration, e.g. 1s); LISTEN/NOTIFY only shortens the wait"
+            },
+            "ring_size": {
+              "type": "integer",
+              "description": "Recent events kept per kind for watch replay"
+            },
+            "retention": {
+              "type": "string",
+              "description": "resource_events history retention (Go duration; 410 Gone floor)"
+            },
+            "bookmark_interval": {
+              "type": "string",
+              "description": "BOOKMARK event cadence on watches requesting them (Go duration)"
+            }
+          }
+        },
         "entities": {
           "type": "array",
           "description": "Entity descriptors registered at startup. Each entry auto-generates REST endpoints, spec validation, and delete policies.",
           "items": {
             "type": "object",
-            "required": ["kind", "plural"],
+            "required": [
+              "kind",
+              "plural"
+            ],
             "properties": {
               "kind": {
                 "type": "string",
@@ -432,7 +467,10 @@
               },
               "on_parent_delete": {
                 "type": "string",
-                "enum": ["restrict", "cascade"],
+                "enum": [
+                  "restrict",
+                  "cascade"
+                ],
                 "description": "Child behavior when parent is deleted (restrict or cascade)"
               },
               "spec_schema_name": {
@@ -441,7 +479,9 @@
               },
               "required_adapters": {
                 "type": "array",
-                "items": { "type": "string" },
+                "items": {
+                  "type": "string"
+                },
                 "description": "Adapters that must finalize before hard-delete"
               },
               "name_min_len": {
@@ -461,7 +501,10 @@
                 "description": "Non-ownership associations to other entity types (HYPERFLEET-1156)",
                 "items": {
                   "type": "object",
-                  "required": ["ref_type", "target_kind"],
+                  "required": [
+                    "ref_type",
+                    "target_kind"
+                  ],
                   "properties": {
                     "ref_type": {
                       "type": "string",

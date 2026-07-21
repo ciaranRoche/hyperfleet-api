@@ -195,6 +195,20 @@ config:
     shutdown_timeout: 20s
     # -- Timeout for the database liveness ping
     db_ping_timeout: 2s
+
+  # -- Kubernetes-compatible read facade (discovery + list + watch) served at
+  # /apis/hyperfleet.openshift.io/v1alpha1 for client-go consumers.
+  k8s_facade:
+    # -- Enable the facade routes and watch cache
+    enabled: false
+    # -- Watch-cache poll cadence (LISTEN/NOTIFY only shortens the wait)
+    poll_interval: 1s
+    # -- Recent events kept per kind for watch replay
+    ring_size: 4096
+    # -- resource_events history retention (410 Gone floor)
+    retention: 1h
+    # -- BOOKMARK event cadence on watches requesting them
+    bookmark_interval: 1m
   # -- Entity descriptors registered at startup. Each entry auto-generates
   # REST endpoints, spec validation, and delete policies.
   entities:

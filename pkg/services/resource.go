@@ -40,6 +40,7 @@ func NewResourceService(
 	resourceLabelDao dao.ResourceLabelDao,
 	adapterStatusDao dao.AdapterStatusDao,
 	resourceConditionDao dao.ResourceConditionDao,
+	resourceEventDao dao.ResourceEventDao,
 	generic GenericService,
 ) ResourceService {
 	return &sqlResourceService{
@@ -47,6 +48,7 @@ func NewResourceService(
 		resourceLabelDao:     resourceLabelDao,
 		adapterStatusDao:     adapterStatusDao,
 		resourceConditionDao: resourceConditionDao,
+		resourceEventDao:     resourceEventDao,
 		generic:              generic,
 	}
 }
@@ -58,7 +60,28 @@ type sqlResourceService struct {
 	resourceLabelDao     dao.ResourceLabelDao
 	adapterStatusDao     dao.AdapterStatusDao
 	resourceConditionDao dao.ResourceConditionDao
+	resourceEventDao     dao.ResourceEventDao
 	generic              GenericService
+}
+
+// emitResourceEvent appends an outbox event snapshotting the resource's
+// current in-memory state. Every mutation path must emit exactly one event
+// per affected resource, inside the request transaction — a failed emit
+// fails the mutation, keeping the event log and table state consistent.
+func (s *sqlResourceService) emitResourceEvent(
+	ctx context.Context, eventType string, resource *api.Resource,
+) *errors.ServiceError {
+	event, err := api.NewResourceEvent(eventType, resource)
+	if err != nil {
+		db.MarkForRollback(ctx, err)
+		return errors.GeneralError("Failed to build resource event: %s", err)
+	}
+	seq, err := s.resourceEventDao.Create(ctx, event)
+	if err != nil {
+		return errors.GeneralError("Failed to record resource event: %s", err)
+	}
+	resource.Rv = seq
+	return nil
 }
 
 // Get returns a single resource by kind and ID. Returns 404 if not found.
@@ -139,9 +162,13 @@ func (s *sqlResourceService) Create(
 	// metrics (INNER JOIN resource_conditions) and status search queries.
 	desc := registry.MustGet(kind)
 	if len(desc.RequiredAdapters) > 0 {
-		if svcErr := s.recomputeAndSaveResourceConditions(ctx, resource, nil); svcErr != nil {
+		if _, svcErr := s.recomputeAndSaveResourceConditions(ctx, resource, nil); svcErr != nil {
 			return nil, svcErr
 		}
+	}
+
+	if svcErr := s.emitResourceEvent(ctx, api.ResourceEventAdded, resource); svcErr != nil {
+		return nil, svcErr
 	}
 
 	return resource, nil
@@ -215,9 +242,13 @@ func (s *sqlResourceService) Patch(
 			db.MarkForRollback(ctx, statusErr)
 			return nil, errors.GeneralError("failed to get adapter statuses for condition recompute: %s", statusErr)
 		}
-		if svcErr := s.recomputeAndSaveResourceConditions(ctx, resource, adapterStatuses); svcErr != nil {
+		if _, svcErr := s.recomputeAndSaveResourceConditions(ctx, resource, adapterStatuses); svcErr != nil {
 			return nil, svcErr
 		}
+	}
+
+	if svcErr := s.emitResourceEvent(ctx, api.ResourceEventModified, resource); svcErr != nil {
+		return nil, svcErr
 	}
 
 	return resource, nil
@@ -312,17 +343,17 @@ func (s *sqlResourceService) deleteResourceTree(
 			db.MarkForRollback(ctx, statusErr)
 			return errors.GeneralError("failed to get adapter statuses for condition recompute: %s", statusErr)
 		}
-		if svcErr := s.recomputeAndSaveResourceConditions(ctx, resource, adapterStatuses); svcErr != nil {
+		if _, svcErr := s.recomputeAndSaveResourceConditions(ctx, resource, adapterStatuses); svcErr != nil {
 			return svcErr
 		}
-		return nil
+		return s.emitResourceEvent(ctx, api.ResourceEventModified, resource)
 	}
 
 	if err := s.resourceDao.Delete(ctx, resource.Kind, resource.ID); err != nil {
 		return handleDeleteError(resource.Kind, err)
 	}
 
-	return nil
+	return s.emitResourceEvent(ctx, api.ResourceEventDeleted, resource)
 }
 
 // shouldSoftDelete determines whether a resource requires soft-deletion.
@@ -565,10 +596,16 @@ func (s *sqlResourceService) ProcessAdapterStatus(
 	// to the resource_conditions table. Only runs when the Available condition
 	// changed to True or False (not on Unknown or discarded updates).
 	if triggerAggregation {
-		if aggregateErr := s.recomputeAndSaveResourceConditions(
+		changed, aggregateErr := s.recomputeAndSaveResourceConditions(
 			ctx, resource, updatedStatuses,
-		); aggregateErr != nil {
+		)
+		if aggregateErr != nil {
 			return nil, aggregateErr
+		}
+		if changed {
+			if svcErr := s.emitResourceEvent(ctx, api.ResourceEventModified, resource); svcErr != nil {
+				return nil, svcErr
+			}
 		}
 	}
 
@@ -577,12 +614,12 @@ func (s *sqlResourceService) ProcessAdapterStatus(
 
 // recomputeAndSaveResourceConditions runs AggregateResourceStatus and persists
 // the result to the resource_conditions table. Skips the write when conditions
-// are unchanged.
+// are unchanged; the returned bool reports whether a write happened.
 func (s *sqlResourceService) recomputeAndSaveResourceConditions(
 	ctx context.Context,
 	resource *api.Resource,
 	adapterStatuses api.AdapterStatusList,
-) *errors.ServiceError {
+) (bool, *errors.ServiceError) {
 	desc := registry.MustGet(resource.Kind)
 
 	// Convert the GORM association ([]ResourceCondition) to JSON so it can be
@@ -594,7 +631,7 @@ func (s *sqlResourceService) recomputeAndSaveResourceConditions(
 		var marshalErr error
 		prevConditionsJSON, marshalErr = json.Marshal(resource.Conditions)
 		if marshalErr != nil {
-			return errors.GeneralError("Failed to marshal previous conditions: %s", marshalErr)
+			return false, errors.GeneralError("Failed to marshal previous conditions: %s", marshalErr)
 		}
 	}
 
@@ -609,7 +646,7 @@ func (s *sqlResourceService) recomputeAndSaveResourceConditions(
 		var err error
 		hasChildResources, err = s.hasActiveChildren(ctx, resource)
 		if err != nil {
-			return errors.GeneralError("Failed to check children for status aggregation: %s", err)
+			return false, errors.GeneralError("Failed to check children for status aggregation: %s", err)
 		}
 	}
 
@@ -640,16 +677,16 @@ func (s *sqlResourceService) recomputeAndSaveResourceConditions(
 	// Compare via JSON to detect actual changes.
 	newJSON, marshalErr := json.Marshal(newConditions)
 	if marshalErr != nil {
-		return errors.GeneralError("Failed to marshal conditions: %s", marshalErr)
+		return false, errors.GeneralError("Failed to marshal conditions: %s", marshalErr)
 	}
 	if jsonEqual(prevConditionsJSON, newJSON) {
-		return nil
+		return false, nil
 	}
 
 	// Write to resource_conditions table (not JSONB on the resource row).
 	// MarkForRollback is handled by the DAO internally.
 	if err := s.resourceConditionDao.UpdateConditions(ctx, resource.ID, newConditions); err != nil {
-		return errors.GeneralError("Failed to update resource conditions: %s", err)
+		return false, errors.GeneralError("Failed to update resource conditions: %s", err)
 	}
 
 	// Update the in-memory resource so callers see the new conditions.
@@ -661,7 +698,7 @@ func (s *sqlResourceService) recomputeAndSaveResourceConditions(
 		metrics.RecordReconciliationStarted(resource.Kind, resource.DeletedTime != nil)
 	}
 
-	return nil
+	return true, nil
 }
 
 // tryHardDeleteResource checks whether all required adapters have reported
@@ -722,6 +759,10 @@ func (s *sqlResourceService) tryHardDeleteResource(
 	}
 	if err := s.resourceDao.Delete(ctx, resource.Kind, resource.ID); err != nil {
 		return false, errors.GeneralError("Failed to hard-delete %s: %s", resource.Kind, err)
+	}
+
+	if svcErr := s.emitResourceEvent(ctx, api.ResourceEventDeleted, resource); svcErr != nil {
+		return false, svcErr
 	}
 
 	logger.With(ctx, "resource_type", resource.Kind, "resource_id", resource.ID).
@@ -925,7 +966,7 @@ func (s *sqlResourceService) forceDeleteResourceTree(
 		return handleDeleteError(resource.Kind, err)
 	}
 
-	return nil
+	return s.emitResourceEvent(ctx, api.ResourceEventDeleted, resource)
 }
 
 // validateReferences checks that refs satisfies the ReferenceDescriptors on the entity:

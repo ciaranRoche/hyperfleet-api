@@ -1,0 +1,31 @@
+# Deploys the facade-watch-controller next to the hyperfleet-api release.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: facade-watch-controller
+  namespace: hyperfleet
+  labels:
+    app: facade-watch-controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: facade-watch-controller
+  template:
+    metadata:
+      labels:
+        app: facade-watch-controller
+    spec:
+      containers:
+        - name: controller
+          image: localhost/facade-watch-controller:manual-test
+          imagePullPolicy: Never
+          env:
+            - name: HYPERFLEET_API_URL
+              value: http://hyperfleet-api.hyperfleet.svc:8000
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi

@@ -18,6 +18,7 @@ import (
 	_ "github.com/openshift-hyperfleet/hyperfleet-api/plugins/adapterStatus"
 	_ "github.com/openshift-hyperfleet/hyperfleet-api/plugins/entities"
 	_ "github.com/openshift-hyperfleet/hyperfleet-api/plugins/generic"
+	_ "github.com/openshift-hyperfleet/hyperfleet-api/plugins/k8sfacade"
 	_ "github.com/openshift-hyperfleet/hyperfleet-api/plugins/resources"
 )
 

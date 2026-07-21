@@ -114,6 +114,24 @@ func (d *resourceDaoMock) FindByKindAndOwnerForUpdate(
 	return d.FindByKindAndOwner(ctx, kind, ownerID)
 }
 
+func (d *resourceDaoMock) GetByName(_ context.Context, kind, name string) (*api.Resource, error) {
+	for _, r := range d.resources {
+		if r.Kind == kind && r.Name == name && r.OwnerID == nil {
+			return r, nil
+		}
+	}
+	return nil, gorm.ErrRecordNotFound
+}
+
+func (d *resourceDaoMock) GetByOwnerAndName(_ context.Context, kind, ownerID, name string) (*api.Resource, error) {
+	for _, r := range d.resources {
+		if r.Kind == kind && r.Name == name && r.OwnerID != nil && *r.OwnerID == ownerID {
+			return r, nil
+		}
+	}
+	return nil, gorm.ErrRecordNotFound
+}
+
 func (d *resourceDaoMock) GetByID(_ context.Context, id string) (*api.Resource, error) {
 	for _, r := range d.resources {
 		if r.ID == id {

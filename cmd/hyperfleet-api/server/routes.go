@@ -34,6 +34,26 @@ func RegisterRoutes(name string, registrationFunc RouteRegistrationFunc) {
 	routeRegistry[name] = registrationFunc
 }
 
+// rootRouteRegistry holds registrations mounted on the top-level router,
+// outside the /api/hyperfleet/v1 middleware chain (no transaction/request
+// timeout, no schema validation, no gzip). JWT auth still applies because it
+// wraps the whole server handler. Used by the Kubernetes-compatible facade.
+var rootRouteRegistry = make(map[string]RouteRegistrationFunc)
+
+func RegisterRootRoutes(name string, registrationFunc RouteRegistrationFunc) {
+	rootRouteRegistry[name] = registrationFunc
+}
+
+// LoadDiscoveredRootRoutes invokes all root-level route registrations.
+func LoadDiscoveredRootRoutes(
+	mainRouter *mux.Router,
+	services ServicesInterface,
+) {
+	for _, registrationFunc := range rootRouteRegistry {
+		registrationFunc(mainRouter, services)
+	}
+}
+
 // LoadDiscoveredRoutes invokes all registered route registration functions.
 //
 // Note: All routes must use .Methods() to restrict HTTP methods.
@@ -94,6 +114,10 @@ func (s *apiServer) routes(tracingEnabled bool) *mux.Router {
 
 	// Auto-discovered routes (no manual editing needed)
 	LoadDiscoveredRoutes(apiV1Router, services)
+
+	// Root-level routes (Kubernetes-compatible facade) bypass the v1
+	// middleware chain by design.
+	LoadDiscoveredRootRoutes(mainRouter, services)
 
 	return mainRouter
 }

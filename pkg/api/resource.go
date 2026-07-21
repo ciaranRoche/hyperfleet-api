@@ -31,6 +31,10 @@ type Resource struct {
 	Conditions []ResourceCondition `json:"-" gorm:"foreignKey:ResourceID;references:ID"`
 	References []ResourceReference `json:"-" gorm:"foreignKey:SourceID;references:ID"`
 	Generation int32               `json:"generation" gorm:"default:1;not null"`
+	// Rv is the seq of this resource's latest resource_events row — the global
+	// monotonic resource version. Written by ResourceEventDao.Create, not by
+	// GORM saves of this model.
+	Rv int64 `json:"-" gorm:"column:rv;<-:false"`
 }
 
 // ReferenceMap is the API-level representation of resource references,

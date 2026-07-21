@@ -2,6 +2,7 @@ package environments
 
 import (
 	"os"
+	"time"
 
 	"github.com/openshift-hyperfleet/hyperfleet-api/pkg/config"
 	"github.com/openshift-hyperfleet/hyperfleet-api/pkg/db/db_session"
@@ -36,6 +37,14 @@ func (e *integrationTestingEnvImpl) OverrideConfig(c *config.ApplicationConfig) 
 	// Ensure SSL mode is set to disable for testing
 	if c.Database.SSL.Mode == "" {
 		c.Database.SSL.Mode = SSLModeDisable
+	}
+
+	// Exercise the Kubernetes-compatible facade in integration tests. The
+	// short poll interval keeps watch tests fast even when NOTIFY hints are
+	// not delivered.
+	if c.K8sFacade != nil {
+		c.K8sFacade.Enabled = true
+		c.K8sFacade.PollInterval = 200 * time.Millisecond
 	}
 
 	// Bootstrap a default JWT issuer for integration tests.

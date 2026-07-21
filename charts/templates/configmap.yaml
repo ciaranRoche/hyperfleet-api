@@ -138,6 +138,15 @@ data:
 
       shutdown_timeout: {{ .Values.config.health.shutdown_timeout }}
       db_ping_timeout: {{ .Values.config.health.db_ping_timeout }}
+
+{{- with .Values.config.k8s_facade }}
+    k8s_facade:
+      enabled: {{ .enabled | default false }}
+      poll_interval: {{ .poll_interval | default "1s" }}
+      ring_size: {{ .ring_size | default 4096 }}
+      retention: {{ .retention | default "1h" }}
+      bookmark_interval: {{ .bookmark_interval | default "1m" }}
+{{- end }}
     # NOTE: When EntityDescriptor gains many more fields, consider replacing
     # the explicit range below with: .Values.config.entities | toYaml | indent 6
 {{- if .Values.config.entities }}

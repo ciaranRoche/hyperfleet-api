@@ -80,6 +80,12 @@ func (rw *responseWriter) Write(b []byte) (int, error) {
 	return rw.ResponseWriter.Write(b)
 }
 
+// Unwrap exposes the underlying ResponseWriter so http.ResponseController
+// can reach optional methods (e.g. SetWriteDeadline for long-lived watches).
+func (rw *responseWriter) Unwrap() http.ResponseWriter {
+	return rw.ResponseWriter
+}
+
 // Flush implements http.Flusher for streaming responses.
 func (rw *responseWriter) Flush() {
 	if f, ok := rw.ResponseWriter.(http.Flusher); ok {
