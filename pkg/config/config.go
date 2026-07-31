@@ -1,6 +1,9 @@
 package config
 
-import "github.com/openshift-hyperfleet/hyperfleet-api/pkg/registry"
+import (
+	"github.com/openshift-hyperfleet/hyperfleet-api/pkg/registry"
+	"github.com/openshift-hyperfleet/hyperfleet-api/pkg/tenant"
+)
 
 // ApplicationConfig holds all application configuration
 // Follows HyperFleet Configuration Standard with validation and structured marshaling
@@ -11,6 +14,7 @@ type ApplicationConfig struct {
 	Database *DatabaseConfig             `mapstructure:"database" json:"database" validate:"required"`
 	Logging  *LoggingConfig              `mapstructure:"logging" json:"logging" validate:"required"`
 	Entities []registry.EntityDescriptor `mapstructure:"entities" json:"entities"`
+	Tenant   *tenant.TenantConfig        `mapstructure:"tenant" json:"tenant"`
 }
 
 // NewApplicationConfig returns default ApplicationConfig with all sub-configs initialized
@@ -22,5 +26,6 @@ func NewApplicationConfig() *ApplicationConfig {
 		Health:   NewHealthConfig(),
 		Database: NewDatabaseConfig(),
 		Logging:  NewLoggingConfig(),
+		Tenant:   &tenant.TenantConfig{Enabled: false},
 	}
 }

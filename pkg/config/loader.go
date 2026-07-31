@@ -187,6 +187,11 @@ func (l *ConfigLoader) validateConfig(config *ApplicationConfig) error {
 		if valErr := config.Metrics.Validate(); valErr != nil {
 			return fmt.Errorf("metrics config validation failed: %w", valErr)
 		}
+		if config.Tenant != nil {
+			if valErr := config.Tenant.Validate(); valErr != nil {
+				return fmt.Errorf("tenant config validation failed: %w", valErr)
+			}
+		}
 		return nil
 	}
 
@@ -307,6 +312,9 @@ func (l *ConfigLoader) bindAllEnvVars() {
 
 	// Entities: config-file-only (complex list-of-struct type).
 	// No env var or CLI flag bindings — loaded exclusively via YAML config.
+
+	// Tenant config: enabled flag can be set via env var; dimensions are YAML-only.
+	l.bindEnv("tenant.enabled")
 }
 
 // bindFlags binds command-line flags to their corresponding Viper config keys

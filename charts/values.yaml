@@ -195,6 +195,23 @@ config:
     shutdown_timeout: 20s
     # -- Timeout for the database liveness ping
     db_ping_timeout: 2s
+  # -- Tenant enforcement configuration. When enabled, a middleware reads
+  # gateway-injected headers and enforces tenant-scoped resource isolation.
+  # Each dimension maps an HTTP header to a resource label key.
+  tenant:
+    # -- Enable tenant enforcement
+    enabled: false
+    # -- Tenant dimensions mapping headers to label keys
+    dimensions: []
+    # Example (org + project model):
+    # dimensions:
+    #   - header: "X-Tenant-Org"
+    #     label_key: "hyperfleet.io/org"
+    #     required: true
+    #   - header: "X-Tenant-Project"
+    #     label_key: "hyperfleet.io/project"
+    #     required: false
+
   # -- Entity descriptors registered at startup. Each entry auto-generates
   # REST endpoints, spec validation, and delete policies.
   entities:

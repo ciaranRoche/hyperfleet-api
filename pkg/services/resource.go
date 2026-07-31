@@ -14,6 +14,7 @@ import (
 	"github.com/openshift-hyperfleet/hyperfleet-api/pkg/logger"
 	"github.com/openshift-hyperfleet/hyperfleet-api/pkg/metrics"
 	"github.com/openshift-hyperfleet/hyperfleet-api/pkg/registry"
+	"github.com/openshift-hyperfleet/hyperfleet-api/pkg/tenant"
 	"github.com/openshift-hyperfleet/hyperfleet-api/pkg/util"
 )
 
@@ -60,6 +61,7 @@ type sqlResourceService struct {
 }
 
 // Get returns a single resource by kind and ID. Returns 404 if not found.
+// When tenant enforcement is active, the resource must belong to the caller's tenant.
 func (s *sqlResourceService) Get(ctx context.Context, kind, id string) (*api.Resource, *errors.ServiceError) {
 	if svcErr := validateKind(kind); svcErr != nil {
 		return nil, svcErr
@@ -67,6 +69,9 @@ func (s *sqlResourceService) Get(ctx context.Context, kind, id string) (*api.Res
 	resource, err := s.resourceDao.Get(ctx, kind, id)
 	if err != nil {
 		return nil, handleGetError(kind, "id", id, err)
+	}
+	if svcErr := verifyTenantOwnership(ctx, kind, id, resource); svcErr != nil {
+		return nil, svcErr
 	}
 	return resource, nil
 }
@@ -110,6 +115,9 @@ func (s *sqlResourceService) Create(
 	if resource.UpdatedBy == "" {
 		resource.UpdatedBy = username
 	}
+
+	// Inject tenant labels from the request context (set by the tenant middleware).
+	resource.Labels = injectTenantLabels(ctx, resource.Labels)
 
 	resource, err := s.resourceDao.Create(ctx, resource)
 	if err != nil {
@@ -155,6 +163,9 @@ func (s *sqlResourceService) Patch(
 	if err != nil {
 		return nil, handleGetError(kind, "id", id, err)
 	}
+	if svcErr := verifyTenantOwnership(ctx, kind, id, resource); svcErr != nil {
+		return nil, svcErr
+	}
 
 	if resource.DeletedTime != nil {
 		return nil, errors.ConflictState("%s '%s' is marked for deletion", kind, id)
@@ -166,6 +177,9 @@ func (s *sqlResourceService) Patch(
 	if applyErr := applyResourcePatch(resource, patch); applyErr != nil {
 		return nil, errors.Validation("Invalid patch data: %v", applyErr)
 	}
+
+	// Preserve tenant labels after patch — user patches must not remove tenant ownership.
+	resource.Labels = preserveTenantLabels(ctx, oldLabels, resource.Labels)
 
 	specChanged := !jsonBytesEqual(oldSpec, resource.Spec)
 	labelsChanged := !labelsEqual(oldLabels, resource.Labels)
@@ -229,6 +243,9 @@ func (s *sqlResourceService) Delete(ctx context.Context, kind, id string) (*api.
 	resource, err := s.resourceDao.GetForUpdate(ctx, kind, id)
 	if err != nil {
 		return nil, handleSoftDeleteError(kind, err)
+	}
+	if svcErr := verifyTenantOwnership(ctx, kind, id, resource); svcErr != nil {
+		return nil, svcErr
 	}
 
 	deletedBy := actorFromContext(ctx)
@@ -383,6 +400,7 @@ func (s *sqlResourceService) checkCanDelete(
 }
 
 // GetByOwner returns a single child resource scoped to the specified owner. Returns 404 if not found.
+// When tenant enforcement is active, the resource must belong to the caller's tenant.
 func (s *sqlResourceService) GetByOwner(
 	ctx context.Context, kind, id, ownerID string,
 ) (*api.Resource, *errors.ServiceError) {
@@ -393,10 +411,14 @@ func (s *sqlResourceService) GetByOwner(
 	if err != nil {
 		return nil, handleGetError(kind, "id", id, err)
 	}
+	if svcErr := verifyTenantOwnership(ctx, kind, id, resource); svcErr != nil {
+		return nil, svcErr
+	}
 	return resource, nil
 }
 
 // List returns resources of the given kind with pagination, search, and ordering.
+// When tenant enforcement is active, results are scoped to the caller's tenant via label filters.
 func (s *sqlResourceService) List(
 	ctx context.Context, kind string, args *ListArguments,
 ) (api.ResourceList, *api.PagingMeta, *errors.ServiceError) {
@@ -414,6 +436,9 @@ func (s *sqlResourceService) List(
 	} else {
 		scopedArgs.Search = "(" + scopedArgs.Search + ") AND " + kindFilter
 	}
+
+	// Inject tenant label filters — scopes results to the caller's tenant.
+	scopedArgs.Search = tenant.InjectSearchFilters(ctx, scopedArgs.Search)
 
 	if svcErr := s.applyRefFilter(ctx, kind, &scopedArgs); svcErr != nil {
 		return nil, nil, svcErr
@@ -445,6 +470,9 @@ func (s *sqlResourceService) ListByOwner(
 	} else {
 		scopedArgs.Search = "(" + scopedArgs.Search + ") AND " + kindFilter
 	}
+
+	// Inject tenant label filters — scopes results to the caller's tenant.
+	scopedArgs.Search = tenant.InjectSearchFilters(ctx, scopedArgs.Search)
 
 	if svcErr := s.applyRefFilter(ctx, kind, &scopedArgs); svcErr != nil {
 		return nil, nil, svcErr
